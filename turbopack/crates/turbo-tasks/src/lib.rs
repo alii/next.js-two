@@ -28,7 +28,6 @@
 
 #![feature(trivial_bounds)]
 #![feature(min_specialization)]
-#![feature(thread_local)]
 #![feature(try_trait_v2)]
 #![deny(unsafe_op_in_unsafe_fn)]
 #![feature(error_generic_member_access)]
@@ -37,6 +36,7 @@
 #![feature(new_zeroed_alloc)]
 #![feature(never_type)]
 #![feature(downcast_unchecked)]
+#![feature(ptr_metadata)]
 
 pub mod backend;
 mod capture_future;
@@ -63,6 +63,7 @@ mod native_function;
 mod no_move_vec;
 mod once_map;
 mod output;
+pub mod panic_hooks;
 pub mod persisted_graph;
 pub mod primitives;
 mod raw_vc;
@@ -74,9 +75,9 @@ mod serialization_invalidation;
 pub mod small_duration;
 mod state;
 pub mod task;
+mod task_execution_reason;
 pub mod task_statistics;
 pub mod trace;
-mod trait_helpers;
 mod trait_ref;
 mod triomphe_utils;
 pub mod util;
@@ -84,7 +85,7 @@ mod value;
 mod value_type;
 mod vc;
 
-use std::{cell::RefCell, hash::BuildHasherDefault, panic};
+use std::hash::BuildHasherDefault;
 
 pub use anyhow::{Error, Result};
 use auto_hash_map::AutoSet;
@@ -94,8 +95,7 @@ pub use completion::{Completion, Completions};
 pub use display::ValueToString;
 pub use effect::{ApplyEffectsContext, Effects, apply_effects, effect, get_effects};
 pub use id::{
-    ExecutionId, FunctionId, LocalTaskId, SessionId, TRANSIENT_TASK_BIT, TaskId, TraitTypeId,
-    ValueTypeId,
+    ExecutionId, LocalTaskId, SessionId, TRANSIENT_TASK_BIT, TaskId, TraitTypeId, ValueTypeId,
 };
 pub use invalidation::{
     DynamicEqHash, InvalidationReason, InvalidationReasonKind, InvalidationReasonSet, Invalidator,
@@ -121,6 +121,7 @@ pub use serialization_invalidation::SerializationInvalidator;
 pub use shrink_to_fit::ShrinkToFit;
 pub use state::{State, TransientState};
 pub use task::{SharedReference, TypedSharedReference, task_input::TaskInput};
+pub use task_execution_reason::TaskExecutionReason;
 pub use trait_ref::{IntoTraitRef, TraitRef};
 pub use turbo_tasks_macros::{TaskInput, function, value_impl};
 pub use value::{TransientInstance, TransientValue};
@@ -300,19 +301,6 @@ pub type TaskIdSet = AutoSet<TaskId, BuildHasherDefault<FxHasher>, 2>;
 
 pub mod test_helpers {
     pub use super::manager::{current_task_for_testing, with_turbo_tasks_for_testing};
-}
-
-thread_local! {
-    /// The location of the last error that occurred in the current thread.
-    ///
-    /// Used for debugging when errors are sent to telemetry
-    pub(crate) static LAST_ERROR_LOCATION: RefCell<Option<String>> = const { RefCell::new(None) };
-}
-
-pub fn handle_panic(info: &panic::PanicHookInfo<'_>) {
-    LAST_ERROR_LOCATION.with_borrow_mut(|loc| {
-        *loc = info.location().map(|l| l.to_string());
-    });
 }
 
 pub fn register() {
